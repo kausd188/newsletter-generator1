@@ -1,25 +1,25 @@
 import { PrismaClient } from "@/app/generated/prisma";
-import { NextResponse, NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 const prisma = new PrismaClient();
 
-type Context = {
-  params: {
-    id: string;
-  };
-};
-
-export async function POST(req: NextRequest, context: Context) {
-  const batchScrapeId = context.params.id;
-
-  if (!batchScrapeId) {
-    return NextResponse.json(
-      { error: "Batch scrape ID required" },
-      { status: 400 }
-    );
-  }
-
+export async function POST(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
+    const batchScrapeId = params.id;
+
+    if (!batchScrapeId) {
+      return NextResponse.json(
+        { error: "Batch scrape ID required" },
+        { status: 400 }
+      );
+    }
+
+    console.log("🛑 Cancelling batch scrape:", batchScrapeId);
+
+    // Get batch scrape from database first
     const batchScrape = await prisma.batchScrape.findUnique({
       where: { id: batchScrapeId },
     });
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest, context: Context) {
       );
     }
 
+    // Check if batch scrape is in a cancellable state
     if (batchScrape.status !== "PENDING" && batchScrape.status !== "SCRAPING") {
       return NextResponse.json(
         {
@@ -40,8 +41,11 @@ export async function POST(req: NextRequest, context: Context) {
       );
     }
 
+    // Try to cancel on Firecrawl first
     if (process.env.FIRECRAWL_API_KEY && batchScrape.jobId) {
       try {
+        console.log("🛑 Cancelling Firecrawl job:", batchScrape.jobId);
+
         const cancelResponse = await fetch(
           `https://api.firecrawl.dev/v1/batch/scrape/${batchScrape.jobId}`,
           {
@@ -57,14 +61,19 @@ export async function POST(req: NextRequest, context: Context) {
             `⚠️ Failed to cancel Firecrawl job ${batchScrape.jobId}:`,
             cancelResponse.status
           );
+          // Continue with database update even if Firecrawl cancellation fails
         } else {
           console.log("✅ Successfully cancelled Firecrawl job");
         }
       } catch (error) {
-        console.warn("⚠️ Error cancelling Firecrawl job:", error);
+        console.warn(
+          "⚠️ Error cancelling Firecrawl job, but continuing with database update:",
+          error
+        );
       }
     }
 
+    // Update status in database
     await prisma.batchScrape.update({
       where: { id: batchScrapeId },
       data: {
@@ -72,6 +81,8 @@ export async function POST(req: NextRequest, context: Context) {
         completedAt: new Date(),
       },
     });
+
+    console.log("✅ Batch scrape cancelled successfully");
 
     return NextResponse.json({ success: true, status: "cancelled" });
   } catch (error) {
