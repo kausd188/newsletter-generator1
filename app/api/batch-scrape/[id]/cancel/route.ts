@@ -1,14 +1,14 @@
 import { PrismaClient } from "@/app/generated/prisma";
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 
 const prisma = new PrismaClient();
 
 export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
+  req: NextRequest,
+  context: { params: { id: string } }
 ) {
   try {
-    const batchScrapeId = params.id;
+    const batchScrapeId = context.params.id;
 
     if (!batchScrapeId) {
       return NextResponse.json(
@@ -61,7 +61,6 @@ export async function POST(
             `⚠️ Failed to cancel Firecrawl job ${batchScrape.jobId}:`,
             cancelResponse.status
           );
-          // Continue with database update even if Firecrawl cancellation fails
         } else {
           console.log("✅ Successfully cancelled Firecrawl job");
         }
